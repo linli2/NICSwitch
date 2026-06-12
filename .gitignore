@@ -1,0 +1,20 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.DotSettings.user
+*.log
+!nicswitch.log
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.nupkg
+
+# OS
+Thumbs.db
+.DS_Store
