@@ -16,7 +16,6 @@ public class TrayManager : IDisposable
 
     // ── 菜单项 ID 常量 ────────────────────────────
     private const string CmdRefresh = "__refresh__";
-    private const string CmdTogglePhysical = "__toggle_physical__";
     private const string CmdEditConfig = "__edit_config__";
     private const string CmdQuit = "__quit__";
     private const string PrefixToggle = "toggle:";
@@ -128,9 +127,7 @@ public class TrayManager : IDisposable
             // ═ 网卡列表 ═══════════
             _menu.Items.Add(new ToolStripMenuItem("📡 网卡列表") { Enabled = false });
 
-            var displayAdapters = _config.ShowPhysicalOnly
-                ? _adapters.Where(a => a.IsHardware).ToList()
-                : _adapters;
+            var displayAdapters = _adapters;
 
             if (displayAdapters.Count == 0)
             {
@@ -178,13 +175,6 @@ public class TrayManager : IDisposable
             // ═ 设置 ═══════════════
             _menu.Items.Add(new ToolStripMenuItem("⚙ 设置") { Enabled = false });
 
-            var physItem = new ToolStripMenuItem("只显示物理网卡")
-            {
-                Checked = _config.ShowPhysicalOnly,
-                Tag = CmdTogglePhysical,
-            };
-            _menu.Items.Add(physItem);
-
             _menu.Items.Add(new ToolStripMenuItem("🔄 刷新状态") { Tag = CmdRefresh });
             _menu.Items.Add(new ToolStripMenuItem("✏️ 编辑配置") { Tag = CmdEditConfig });
 
@@ -213,11 +203,6 @@ public class TrayManager : IDisposable
         {
             case CmdRefresh:
                 _adapters = NicManager.ListAdapters();
-                return;
-
-            case CmdTogglePhysical:
-                _config.ShowPhysicalOnly = !_config.ShowPhysicalOnly;
-                ConfigManager.Save(_config);
                 return;
 
             case CmdEditConfig:

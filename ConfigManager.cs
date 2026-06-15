@@ -10,9 +10,6 @@ namespace NICSwitch;
 
 public class Config
 {
-    [JsonPropertyName("show_physical_only")]
-    public bool ShowPhysicalOnly { get; set; } = false;
-
     [JsonPropertyName("auto_refresh_interval")]
     public int AutoRefreshInterval { get; set; } = 5;
 
