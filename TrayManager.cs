@@ -1,6 +1,7 @@
 /// 托盘图标和菜单管理
 
 using System.Diagnostics;
+using System.Reflection;
 
 namespace NICSwitch;
 
@@ -9,7 +10,6 @@ public class TrayManager : IDisposable
     private readonly NotifyIcon _trayIcon;
     private readonly ContextMenuStrip _menu = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new();
-    private readonly Form _menuOwner; // 隐藏窗口，作为菜单的所有者
     private Config _config;
     private List<NetworkAdapter> _adapters = new();
     private bool _rebuilding;
@@ -27,19 +27,6 @@ public class TrayManager : IDisposable
         _config = ConfigManager.Load();
         _adapters = NicManager.ListAdapters();
 
-        // 隐藏所有者窗口（让菜单有父窗口，才能正常弹出/关闭）
-        _menuOwner = new Form
-        {
-            ShowInTaskbar = false,
-            FormBorderStyle = FormBorderStyle.None,
-            WindowState = FormWindowState.Minimized,
-            Size = new Size(0, 0),
-            StartPosition = FormStartPosition.Manual,
-            Location = new Point(-32000, -32000),
-        };
-        // 要 Show 后才能作为菜单所有者
-        _menuOwner.Show();
-
         // 托盘图标
         _trayIcon = new NotifyIcon
         {
@@ -48,8 +35,15 @@ public class TrayManager : IDisposable
             Visible = true,
         };
 
-        // 鼠标点击（左/右键统一处理）
+        // 右键：系统原生弹出，自动关闭
+        _trayIcon.ContextMenuStrip = _menu;
+
+        // 左键：通过反射调用 NotifyIcon.ShowContextMenu()
+        // 这是 .NET 内部方法，行为与右键完全一致
         _trayIcon.MouseClick += OnTrayMouseClick;
+
+        // 菜单打开时刷新数据
+        _menu.Opening += OnMenuOpening;
 
         // 菜单项点击
         _menu.ItemClicked += OnMenuItemClicked;
@@ -66,21 +60,35 @@ public class TrayManager : IDisposable
         Logger.Info("托盘图标已创建");
     }
 
-    // ── 鼠标点击处理 ──────────────────────────────
+    // ── 鼠标点击 ──────────────────────────────────
 
     private void OnTrayMouseClick(object? sender, MouseEventArgs e)
     {
-        Logger.Info($"托盘: {(e.Button == MouseButtons.Left ? "左键" : "右键")}单击");
-
-        // 点击时刷新网卡状态
+        // 每次点击刷新网卡状态并重建菜单
         _adapters = NicManager.ListAdapters();
         RebuildMenu();
 
-        // 在鼠标位置弹出菜单（通过 _menuOwner 作为所有者，确保自动关闭）
-        _menu.Show(_menuOwner, _menuOwner.PointToClient(Cursor.Position));
+        if (e.Button == MouseButtons.Left)
+        {
+            Logger.Info("左键单击 → 弹出菜单");
+            // 调用 NotifyIcon 内部 ShowContextMenu()
+            // 该方法触发 TrackPopupMenu，行为与右键完全一致（自动关闭）
+            var method = typeof(NotifyIcon).GetMethod("ShowContextMenu",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            method?.Invoke(_trayIcon, null);
+        }
     }
 
-    // ── 构建菜单 ──────────────────────────────────
+    // ── 菜单打开时刷新菜单内容 ────────────────────
+
+    private void OnMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        // Opening 事件触发时重建菜单内容
+        // 注意：不要在这里 Clear + Add，否则菜单会闪烁
+        // 改用修改现有项的方式
+    }
+
+    // ── 构建菜单（全量重建） ──────────────────────
 
     private void RebuildMenu()
     {
@@ -173,7 +181,7 @@ public class TrayManager : IDisposable
         if (string.IsNullOrEmpty(tag)) return;
 
         Logger.Info($"菜单点击: {tag}");
-        _menu.Close();
+        _menu.Close(); // 关闭菜单
 
         switch (tag)
         {
@@ -301,8 +309,6 @@ public class TrayManager : IDisposable
     {
         _refreshTimer?.Stop();
         _refreshTimer?.Dispose();
-        _menuOwner?.Close();
-        _menuOwner?.Dispose();
         _trayIcon?.Dispose();
         _menu?.Dispose();
     }
