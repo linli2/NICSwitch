@@ -31,10 +31,11 @@ public class TrayManager : IDisposable
         _menu.Renderer = new ModernMenuRenderer();
         _menu.Font = new Font("Microsoft YaHei UI", 9F);
 
-        // 托盘图标
+        // 托盘图标（优先加载同目录下 app.ico）
+        var icon = LoadTrayIcon();
         _trayIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = icon,
             Text = "NICSwitch - 网卡切换",
             Visible = true,
         };
@@ -62,6 +63,27 @@ public class TrayManager : IDisposable
         RebuildMenu();
 
         Logger.Info("托盘图标已创建");
+    }
+
+    // ── 加载自定义图标 ────────────────────────────
+
+    private static Icon LoadTrayIcon()
+    {
+        try
+        {
+            var iconPath = Path.Combine(AppContext.BaseDirectory, "app.ico");
+            if (File.Exists(iconPath))
+            {
+                var icon = new Icon(iconPath);
+                Logger.Info($"已加载自定义图标: {iconPath}");
+                return icon;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"加载图标失败: {ex.Message}");
+        }
+        return SystemIcons.Application;
     }
 
     // ── 鼠标点击 ──────────────────────────────────
