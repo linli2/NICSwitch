@@ -1,0 +1,14 @@
+{
+  "show_physical_only": false,
+  "auto_refresh_interval": 5,
+  "profiles": [
+    {
+      "name": "🔀 切换到内网",
+      "description": "关闭 WLAN，启用 以太网",
+      "actions": [
+        { "name": "WLAN", "action": "disable" },
+        { "name": "以太网", "action": "enable" }
+      ]
+    }
+  ]
+}

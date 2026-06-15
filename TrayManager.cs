@@ -9,6 +9,7 @@ public class TrayManager : IDisposable
     private readonly NotifyIcon _trayIcon;
     private readonly ContextMenuStrip _menu = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new();
+    private readonly Form _menuOwner; // 隐藏窗口，作为菜单的所有者
     private Config _config;
     private List<NetworkAdapter> _adapters = new();
     private bool _rebuilding;
@@ -26,6 +27,19 @@ public class TrayManager : IDisposable
         _config = ConfigManager.Load();
         _adapters = NicManager.ListAdapters();
 
+        // 隐藏所有者窗口（让菜单有父窗口，才能正常弹出/关闭）
+        _menuOwner = new Form
+        {
+            ShowInTaskbar = false,
+            FormBorderStyle = FormBorderStyle.None,
+            WindowState = FormWindowState.Minimized,
+            Size = new Size(0, 0),
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(-32000, -32000),
+        };
+        // 要 Show 后才能作为菜单所有者
+        _menuOwner.Show();
+
         // 托盘图标
         _trayIcon = new NotifyIcon
         {
@@ -34,8 +48,7 @@ public class TrayManager : IDisposable
             Visible = true,
         };
 
-        // ⚠️ Win11 上 ContextMenuStrip 自动弹出不稳定
-        // 改用 MouseClick 手动处理左键/右键
+        // 鼠标点击（左/右键统一处理）
         _trayIcon.MouseClick += OnTrayMouseClick;
 
         // 菜单项点击
@@ -53,18 +66,18 @@ public class TrayManager : IDisposable
         Logger.Info("托盘图标已创建");
     }
 
-    // ── 统一鼠标点击处理（左键/右键都弹菜单） ──────
+    // ── 鼠标点击处理 ──────────────────────────────
 
     private void OnTrayMouseClick(object? sender, MouseEventArgs e)
     {
         Logger.Info($"托盘: {(e.Button == MouseButtons.Left ? "左键" : "右键")}单击");
 
-        // 每次点击刷新网卡状态
+        // 点击时刷新网卡状态
         _adapters = NicManager.ListAdapters();
         RebuildMenu();
 
-        // 在鼠标当前位置弹出菜单
-        _menu.Show(Cursor.Position);
+        // 在鼠标位置弹出菜单（通过 _menuOwner 作为所有者，确保自动关闭）
+        _menu.Show(_menuOwner, _menuOwner.PointToClient(Cursor.Position));
     }
 
     // ── 构建菜单 ──────────────────────────────────
@@ -97,13 +110,11 @@ public class TrayManager : IDisposable
                     var item = new ToolStripMenuItem(adapter.Name)
                     {
                         Tag = PrefixToggle + adapter.Name,
-                        // ✓ 已启用（勾选标记）/  已禁用（灰色文字）
                         Checked = isEnabled,
                         ForeColor = isEnabled
                             ? SystemColors.ControlText
                             : SystemColors.GrayText,
                     };
-                    // 未知状态禁用点击
                     if (adapter.State == NicState.Unknown)
                         item.Enabled = false;
                     _menu.Items.Add(item);
@@ -162,21 +173,17 @@ public class TrayManager : IDisposable
         if (string.IsNullOrEmpty(tag)) return;
 
         Logger.Info($"菜单点击: {tag}");
-
-        // 先关闭菜单
         _menu.Close();
 
         switch (tag)
         {
             case CmdRefresh:
                 _adapters = NicManager.ListAdapters();
-                RebuildMenu();
                 return;
 
             case CmdTogglePhysical:
                 _config.ShowPhysicalOnly = !_config.ShowPhysicalOnly;
                 ConfigManager.Save(_config);
-                RebuildMenu();
                 return;
 
             case CmdEditConfig:
@@ -201,7 +208,6 @@ public class TrayManager : IDisposable
                 {
                     Thread.Sleep(500);
                     _adapters = NicManager.ListAdapters();
-                    RebuildMenu();
                 }
             }
             return;
@@ -244,7 +250,6 @@ public class TrayManager : IDisposable
 
         Thread.Sleep(500);
         _adapters = NicManager.ListAdapters();
-        RebuildMenu();
     }
 
     // ── 编辑配置 ──────────────────────────────────
@@ -296,6 +301,8 @@ public class TrayManager : IDisposable
     {
         _refreshTimer?.Stop();
         _refreshTimer?.Dispose();
+        _menuOwner?.Close();
+        _menuOwner?.Dispose();
         _trayIcon?.Dispose();
         _menu?.Dispose();
     }
