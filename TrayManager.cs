@@ -27,6 +27,10 @@ public class TrayManager : IDisposable
         _config = ConfigManager.Load();
         _adapters = NicManager.ListAdapters();
 
+        // ── 美化菜单渲染 ──
+        _menu.Renderer = new ModernMenuRenderer();
+        _menu.Font = new Font("Microsoft YaHei UI", 9F);
+
         // 托盘图标
         _trayIcon = new NotifyIcon
         {
@@ -83,9 +87,9 @@ public class TrayManager : IDisposable
 
     private void OnMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        // Opening 事件触发时重建菜单内容
-        // 注意：不要在这里 Clear + Add，否则菜单会闪烁
-        // 改用修改现有项的方式
+        // 右键打开菜单时刷新数据（左键在 OnTrayMouseClick 已刷新）
+        _adapters = NicManager.ListAdapters();
+        RebuildMenu();
     }
 
     // ── 构建菜单（全量重建） ──────────────────────
@@ -181,7 +185,7 @@ public class TrayManager : IDisposable
         if (string.IsNullOrEmpty(tag)) return;
 
         Logger.Info($"菜单点击: {tag}");
-        _menu.Close(); // 关闭菜单
+        // 菜单会自动关闭（原生 TrackPopupMenu），不需要手动 Close
 
         switch (tag)
         {
@@ -312,4 +316,22 @@ public class TrayManager : IDisposable
         _trayIcon?.Dispose();
         _menu?.Dispose();
     }
+}
+
+/// 现代风格菜单渲染器（美化菜单外观）
+public class ModernMenuRenderer : ToolStripProfessionalRenderer
+{
+    public ModernMenuRenderer() : base(new ModernColorTable()) { }
+}
+
+public class ModernColorTable : ProfessionalColorTable
+{
+    public override Color MenuItemSelected => Color.FromArgb(0xE3, 0xF0, 0xFD);       // 悬停浅蓝
+    public override Color MenuItemBorder => Color.FromArgb(0x99, 0xCF, 0xF8);          // 悬停边框
+    public override Color MenuItemSelectedGradientBegin => Color.FromArgb(0xE3, 0xF0, 0xFD);
+    public override Color MenuItemSelectedGradientEnd => Color.FromArgb(0xE3, 0xF0, 0xFD);
+    public override Color ToolStripDropDownBackground => Color.White;                   // 白底
+    public override Color ImageMarginGradientBegin => Color.White;
+    public override Color ImageMarginGradientMiddle => Color.White;
+    public override Color ImageMarginGradientEnd => Color.White;
 }
