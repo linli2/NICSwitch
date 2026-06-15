@@ -94,12 +94,16 @@ public class TrayManager : IDisposable
                 foreach (var adapter in displayAdapters)
                 {
                     var isEnabled = adapter.State == NicState.Enabled;
-                    var status = isEnabled ? "🟢" : "🔴";
-                    var label = $"{status}  {adapter.Name}";
-                    var item = new ToolStripMenuItem(label)
+                    var item = new ToolStripMenuItem(adapter.Name)
                     {
                         Tag = PrefixToggle + adapter.Name,
+                        // ✓ 已启用（勾选标记）/  已禁用（灰色文字）
+                        Checked = isEnabled,
+                        ForeColor = isEnabled
+                            ? SystemColors.ControlText
+                            : SystemColors.GrayText,
                     };
+                    // 未知状态禁用点击
                     if (adapter.State == NicState.Unknown)
                         item.Enabled = false;
                     _menu.Items.Add(item);
@@ -109,6 +113,7 @@ public class TrayManager : IDisposable
             _menu.Items.Add(new ToolStripSeparator());
 
             // ═ 快速切换 Profiles ═══
+            Logger.Debug($"Profiles 数量: {_config.Profiles.Count}");
             if (_config.Profiles.Count > 0)
             {
                 _menu.Items.Add(new ToolStripMenuItem("⚡ 快速切换") { Enabled = false });
