@@ -1,6 +1,5 @@
 /// 托盘图标和菜单管理
 
-using System.ComponentModel;
 using System.Diagnostics;
 
 namespace NICSwitch;
@@ -35,14 +34,9 @@ public class TrayManager : IDisposable
             Visible = true,
         };
 
-        // 右键菜单
-        _trayIcon.ContextMenuStrip = _menu;
-
-        // 左键点击 → 刷新+弹出菜单
-        _trayIcon.Click += OnTrayLeftClick;
-
-        // 菜单打开时重建（保证最新状态）
-        _menu.Opening += OnMenuOpening;
+        // ⚠️ Win11 上 ContextMenuStrip 自动弹出不稳定
+        // 改用 MouseClick 手动处理左键/右键
+        _trayIcon.MouseClick += OnTrayMouseClick;
 
         // 菜单项点击
         _menu.ItemClicked += OnMenuItemClicked;
@@ -59,24 +53,18 @@ public class TrayManager : IDisposable
         Logger.Info("托盘图标已创建");
     }
 
-    // ── 左键点击 ──────────────────────────────────
+    // ── 统一鼠标点击处理（左键/右键都弹菜单） ──────
 
-    private void OnTrayLeftClick(object? sender, EventArgs e)
+    private void OnTrayMouseClick(object? sender, MouseEventArgs e)
     {
-        // Win11 左键通知栏图标默认不弹菜单，手动刷新+弹出
-        Logger.Info("左键单击");
+        Logger.Info($"托盘: {(e.Button == MouseButtons.Left ? "左键" : "右键")}单击");
+
+        // 每次点击刷新网卡状态
         _adapters = NicManager.ListAdapters();
         RebuildMenu();
-        _menu.Show(); // 强制显示菜单
-    }
 
-    // ── 菜单打开时重建 ────────────────────────────
-
-    private void OnMenuOpening(object? sender, CancelEventArgs e)
-    {
-        // 每次打开菜单时刷新状态
-        _adapters = NicManager.ListAdapters();
-        RebuildMenu();
+        // 在鼠标当前位置弹出菜单
+        _menu.Show(Cursor.Position);
     }
 
     // ── 构建菜单 ──────────────────────────────────
