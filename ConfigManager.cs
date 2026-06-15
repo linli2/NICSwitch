@@ -1,38 +1,60 @@
 /// 配置文件管理
 /// config.json 位置: %APPDATA%/NICSwitch/config.json
+/// JSON 使用小写字段名（兼容旧版 Rust 格式），不转义中文
 
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace NICSwitch;
 
 public class Config
 {
+    [JsonPropertyName("show_physical_only")]
     public bool ShowPhysicalOnly { get; set; } = false;
+
+    [JsonPropertyName("auto_refresh_interval")]
     public int AutoRefreshInterval { get; set; } = 5;
+
+    [JsonPropertyName("profiles")]
     public List<Profile> Profiles { get; set; } = new();
 }
 
 public class Profile
 {
+    [JsonPropertyName("name")]
     public string Name { get; set; } = "";
+
+    [JsonPropertyName("description")]
     public string? Description { get; set; }
+
+    [JsonPropertyName("actions")]
     public List<ProfileAction> Actions { get; set; } = new();
 }
 
 public class ProfileAction
 {
+    [JsonPropertyName("name")]
     public string Name { get; set; } = "";
-    public string Action { get; set; } = ""; // "enable" or "disable"
+
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "";
 }
 
 public static class ConfigManager
 {
     private static readonly string ConfigDir;
     private static readonly string ConfigPath;
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions ReadOptions = new()
+    {
+        PropertyNameCaseInsensitive = true, // 读入时兼容大小写（新旧格式都能读）
+    };
+    private static readonly JsonSerializerOptions WriteOptions = new()
     {
         WriteIndented = true,
-        PropertyNameCaseInsensitive = true, // 兼容小写字段名的 JSON
+        PropertyNameCaseInsensitive = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // 保留中文，不转义
+        // [JsonPropertyName] 确保写入小写字段名
     };
 
     static ConfigManager()
@@ -60,7 +82,7 @@ public static class ConfigManager
         try
         {
             var json = File.ReadAllText(ConfigPath);
-            var cfg = JsonSerializer.Deserialize<Config>(json);
+            var cfg = JsonSerializer.Deserialize<Config>(json, ReadOptions);
             if (cfg != null) return cfg;
         }
         catch (Exception ex)
@@ -77,7 +99,7 @@ public static class ConfigManager
     {
         try
         {
-            var json = JsonSerializer.Serialize(config, JsonOptions);
+            var json = JsonSerializer.Serialize(config, WriteOptions);
             File.WriteAllText(ConfigPath, json);
         }
         catch (Exception ex)
