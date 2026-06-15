@@ -94,8 +94,10 @@ public static class NicManager
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                StandardOutputEncoding = System.Text.Encoding.UTF8,
-                StandardErrorEncoding = System.Text.Encoding.UTF8,
+                // 使用系统默认编码（中文 Windows 为 GBK），
+                // 不要硬编码 UTF-8，否则中文输出会乱码
+                StandardOutputEncoding = System.Text.Encoding.Default,
+                StandardErrorEncoding = System.Text.Encoding.Default,
             };
 
             using var proc = Process.Start(psi)!;

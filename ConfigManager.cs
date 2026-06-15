@@ -32,6 +32,7 @@ public static class ConfigManager
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
+        PropertyNameCaseInsensitive = true, // 兼容小写字段名的 JSON
     };
 
     static ConfigManager()
