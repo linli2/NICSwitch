@@ -85,6 +85,23 @@ public class TrayManager : IDisposable
         return SystemIcons.Application;
     }
 
+    // ── 彩色状态圆点图标 ──────────────────────────
+
+    /// <summary>绿色圆点 (启用)</summary>
+    private static Bitmap GreenDot() => MakeDot(Color.FromArgb(0x00, 0xC8, 0x53));
+    /// <summary>红色圆点 (禁用)</summary>
+    private static Bitmap RedDot() => MakeDot(Color.FromArgb(0xFF, 0x33, 0x33));
+
+    private static Bitmap MakeDot(Color fill)
+    {
+        var bmp = new Bitmap(14, 14);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var brush = new SolidBrush(fill);
+        g.FillEllipse(brush, 1, 1, 12, 12);
+        return bmp;
+    }
+
     // ── 鼠标点击 ──────────────────────────────────
 
     private void OnTrayMouseClick(object? sender, MouseEventArgs e)
@@ -137,27 +154,26 @@ public class TrayManager : IDisposable
                 {
                     var name = adapter.Name; // capture for closure
                     var isEnabled = adapter.State == NicState.Enabled;
-                    var icon = isEnabled ? "\u2713 " : "\u2717 ";
-                    var item = new ToolStripMenuItem(icon + adapter.Name)
+                    var item = new ToolStripMenuItem(" " + adapter.Name)
                     {
                         Tag = PrefixToggle + name,
+                        Image = isEnabled ? GreenDot() : RedDot(),
                         ForeColor = isEnabled
-                            ? SystemColors.ControlText
-                            : SystemColors.GrayText,
+                            ? Color.FromArgb(0x00, 0x7A, 0x33)   // 深绿色
+                            : Color.FromArgb(0xCC, 0x00, 0x00),  // 深红色
+                        Font = isEnabled
+                            ? new Font(_menu.Font, FontStyle.Bold)
+                            : _menu.Font,
                     };
 
-                    // 右键 -> 关闭主菜单并弹出操作菜单
+                    // 右键 -> 弹出操作菜单
                     item.MouseDown += (s, e) =>
                     {
                         if (e.Button == MouseButtons.Right)
                         {
                             _skipNextAdapterClick = true;
 
-                            // 先关闭主菜单
-                            if (item.Owner is ToolStripDropDownMenu owner)
-                                owner.Close();
-
-                            // 再弹出操作菜单
+                            // 弹出操作菜单
                             var popup = new ContextMenuStrip();
                             popup.Font = _menu.Font;
                             popup.Renderer = new ModernMenuRenderer();
