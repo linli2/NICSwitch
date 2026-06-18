@@ -18,9 +18,6 @@ public class TrayManager : IDisposable
     private bool _skipNextAdapterClick;
 
     // ── 菜单项 ID 常量 ────────────────────────────
-    private const string CmdRefresh = "__refresh__";
-    private const string CmdEditConfig = "__edit_config__";
-    private const string CmdOpenNcpa = "__open_ncpa__";
     private const string CmdQuit = "__quit__";
     private const string PrefixToggle = "toggle:";
     private const string PrefixProfile = "profile:";
@@ -140,7 +137,7 @@ public class TrayManager : IDisposable
                 {
                     var name = adapter.Name; // capture for closure
                     var isEnabled = adapter.State == NicState.Enabled;
-                    var icon = isEnabled ? "[ON] " : "[OFF]";
+                    var icon = isEnabled ? "\u2713 " : "\u2717 ";
                     var item = new ToolStripMenuItem(icon + adapter.Name)
                     {
                         Tag = PrefixToggle + name,
@@ -149,12 +146,18 @@ public class TrayManager : IDisposable
                             : SystemColors.GrayText,
                     };
 
-                    // 右键 -> 弹出操作菜单
+                    // 右键 -> 关闭主菜单并弹出操作菜单
                     item.MouseDown += (s, e) =>
                     {
                         if (e.Button == MouseButtons.Right)
                         {
                             _skipNextAdapterClick = true;
+
+                            // 先关闭主菜单
+                            if (item.Owner is ToolStripDropDownMenu owner)
+                                owner.Close();
+
+                            // 再弹出操作菜单
                             var popup = new ContextMenuStrip();
                             popup.Font = _menu.Font;
                             popup.Renderer = new ModernMenuRenderer();
@@ -169,15 +172,10 @@ public class TrayManager : IDisposable
                                 }
                             });
                             popup.Items.Add("状态", null, (_, _) => ShowAdapterStatus(name));
-                            popup.Items.Add("诊断", null, (_, _) => DiagnoseAdapter(name));
                             popup.Items.Add("属性", null, (_, _) => OpenAdapterProperties(name));
 
-                            // 在鼠标位置弹出
-                            if (item.Owner is ToolStripDropDownMenu ownerMenu)
-                                // 映射到屏幕坐标
-                                popup.Show(ownerMenu, e.Location);
-                            else
-                                popup.Show(Cursor.Position);
+                            // 在鼠标屏幕坐标位置弹出
+                            popup.Show(Cursor.Position);
                         }
                     };
 
@@ -336,24 +334,6 @@ public class TrayManager : IDisposable
         catch (Exception ex)
         {
             Logger.Error($"显示网卡状态失败: {ex.Message}");
-        }
-    }
-
-    // ── 网络诊断 ──────────────────────────────────
-
-    private static void DiagnoseAdapter(string name)
-    {
-        try
-        {
-            Logger.Info($"诊断网卡: {name}");
-            Process.Start(new ProcessStartInfo("msdt.exe", "-id NetworkDiagnosticsNetworkAdapter")
-            {
-                UseShellExecute = true,
-            });
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"启动诊断失败: {ex.Message}");
         }
     }
 
