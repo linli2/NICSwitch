@@ -14,6 +14,8 @@ public class TrayManager : IDisposable
     private Config _config;
     private List<NetworkAdapter> _adapters = new();
     private bool _rebuilding;
+    /// 右键点击网卡项时设此标志，跳过 ItemClicked 中的切换逻辑
+    private bool _skipNextAdapterClick;
 
     // ── 菜单项 ID 常量 ────────────────────────────
     private const string CmdRefresh = "__refresh__";
@@ -22,9 +24,6 @@ public class TrayManager : IDisposable
     private const string CmdQuit = "__quit__";
     private const string PrefixToggle = "toggle:";
     private const string PrefixProfile = "profile:";
-    private const string PrefixStatus = "status:";
-    private const string PrefixDiagnose = "diagnose:";
-    private const string PrefixProperties = "properties:";
 
     public TrayManager()
     {
@@ -99,7 +98,7 @@ public class TrayManager : IDisposable
 
         if (e.Button == MouseButtons.Left)
         {
-            Logger.Info("左键单击 → 弹出菜单");
+            Logger.Info("左键单击 -> 弹出菜单");
             var method = typeof(NotifyIcon).GetMethod("ShowContextMenu",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             method?.Invoke(_trayIcon, null);
@@ -126,7 +125,8 @@ public class TrayManager : IDisposable
             _menu.Items.Clear();
 
             // ═ 网卡列表 ═══════════
-            _menu.Items.Add(new ToolStripMenuItem("📡 网卡列表") { Enabled = false });
+            var header = new ToolStripMenuItem("== 网卡列表 ==") { Enabled = false };
+            _menu.Items.Add(header);
 
             var displayAdapters = _adapters;
 
@@ -138,47 +138,48 @@ public class TrayManager : IDisposable
             {
                 foreach (var adapter in displayAdapters)
                 {
+                    var name = adapter.Name; // capture for closure
                     var isEnabled = adapter.State == NicState.Enabled;
-                    var item = new ToolStripMenuItem(adapter.Name)
+                    var icon = isEnabled ? "[ON] " : "[OFF]";
+                    var item = new ToolStripMenuItem(icon + adapter.Name)
                     {
+                        Tag = PrefixToggle + name,
                         ForeColor = isEnabled
                             ? SystemColors.ControlText
                             : SystemColors.GrayText,
                     };
 
-                    // ── 子菜单：功能和 ncpa.cpl 右键一致 ──
-                    var toggleText = isEnabled ? "🔴 禁用" : "🟢 启用";
-                    var toggleItem = new ToolStripMenuItem(toggleText)
+                    // 右键 -> 弹出操作菜单
+                    item.MouseDown += (s, e) =>
                     {
-                        Tag = PrefixToggle + adapter.Name,
+                        if (e.Button == MouseButtons.Right)
+                        {
+                            _skipNextAdapterClick = true;
+                            var popup = new ContextMenuStrip();
+                            popup.Font = _menu.Font;
+                            popup.Renderer = new ModernMenuRenderer();
+
+                            popup.Items.Add("启用/禁用", null, (_, _) =>
+                            {
+                                Logger.Info($"切换网卡: {name}");
+                                if (NicManager.ToggleAdapter(name, adapter.State))
+                                {
+                                    Thread.Sleep(500);
+                                    _adapters = NicManager.ListAdapters();
+                                }
+                            });
+                            popup.Items.Add("状态", null, (_, _) => ShowAdapterStatus(name));
+                            popup.Items.Add("诊断", null, (_, _) => DiagnoseAdapter(name));
+                            popup.Items.Add("属性", null, (_, _) => OpenAdapterProperties(name));
+
+                            // 在鼠标位置弹出
+                            if (item.Owner is ToolStripDropDownMenu ownerMenu)
+                                // 映射到屏幕坐标
+                                popup.Show(ownerMenu, e.Location);
+                            else
+                                popup.Show(Cursor.Position);
+                        }
                     };
-
-                    var statusItem = new ToolStripMenuItem("📊 状态")
-                    {
-                        Tag = PrefixStatus + adapter.Name,
-                    };
-
-                    var diagnoseItem = new ToolStripMenuItem("🔍 诊断")
-                    {
-                        Tag = PrefixDiagnose + adapter.Name,
-                    };
-
-                    var propsItem = new ToolStripMenuItem("⚙ 属性")
-                    {
-                        Tag = PrefixProperties + adapter.Name,
-                    };
-
-                    item.DropDownItems.Add(toggleItem);
-                    item.DropDownItems.Add(statusItem);
-                    item.DropDownItems.Add(diagnoseItem);
-                    item.DropDownItems.Add(new ToolStripSeparator());
-                    item.DropDownItems.Add(propsItem);
-
-                    if (adapter.State == NicState.Unknown)
-                    {
-                        toggleItem.Enabled = false;
-                        statusItem.Enabled = false;
-                    }
 
                     _menu.Items.Add(item);
                 }
@@ -190,7 +191,7 @@ public class TrayManager : IDisposable
             Logger.Debug($"Profiles 数量: {_config.Profiles.Count}");
             if (_config.Profiles.Count > 0)
             {
-                _menu.Items.Add(new ToolStripMenuItem("⚡ 快速切换") { Enabled = false });
+                _menu.Items.Add(new ToolStripMenuItem("== 快速切换 ==") { Enabled = false });
 
                 foreach (var profile in _config.Profiles)
                 {
@@ -205,16 +206,19 @@ public class TrayManager : IDisposable
             }
 
             // ═ 设置 ═══════════════
-            _menu.Items.Add(new ToolStripMenuItem("⚙ 设置") { Enabled = false });
+            _menu.Items.Add(new ToolStripMenuItem("== 设置 ==") { Enabled = false });
 
-            _menu.Items.Add(new ToolStripMenuItem("🌐 网卡设置") { Tag = CmdOpenNcpa });
-            _menu.Items.Add(new ToolStripMenuItem("🔄 刷新状态") { Tag = CmdRefresh });
-            _menu.Items.Add(new ToolStripMenuItem("✏️ 编辑配置") { Tag = CmdEditConfig });
+            _menu.Items.Add(new ToolStripMenuItem("网卡设置", null, (_, _) => OpenNcpaCpl()));
+            _menu.Items.Add(new ToolStripMenuItem("刷新状态", null, (_, _) =>
+            {
+                _adapters = NicManager.ListAdapters();
+            }));
+            _menu.Items.Add(new ToolStripMenuItem("编辑配置", null, (_, _) => OpenConfigFile()));
 
             _menu.Items.Add(new ToolStripSeparator());
 
             // ═ 退出 ═══════════════
-            _menu.Items.Add(new ToolStripMenuItem("❌ 退出") { Tag = CmdQuit });
+            _menu.Items.Add(new ToolStripMenuItem("退出") { Tag = CmdQuit });
         }
         finally
         {
@@ -233,18 +237,6 @@ public class TrayManager : IDisposable
 
         switch (tag)
         {
-            case CmdRefresh:
-                _adapters = NicManager.ListAdapters();
-                return;
-
-            case CmdOpenNcpa:
-                OpenNcpaCpl();
-                return;
-
-            case CmdEditConfig:
-                OpenConfigFile();
-                return;
-
             case CmdQuit:
                 Logger.Info("用户退出");
                 _trayIcon.Visible = false;
@@ -254,38 +246,24 @@ public class TrayManager : IDisposable
 
         if (tag.StartsWith(PrefixToggle))
         {
+            // 右键触发的 MouseDown 已设标志，跳过此次点击
+            if (_skipNextAdapterClick)
+            {
+                _skipNextAdapterClick = false;
+                return;
+            }
+
             var name = tag[PrefixToggle.Length..];
             var adapter = _adapters.FirstOrDefault(a => a.Name == name);
             if (adapter != null)
             {
-                Logger.Info($"切换网卡: {name}");
+                Logger.Info($"左键切换网卡: {name}");
                 if (NicManager.ToggleAdapter(name, adapter.State))
                 {
                     Thread.Sleep(500);
                     _adapters = NicManager.ListAdapters();
                 }
             }
-            return;
-        }
-
-        if (tag.StartsWith(PrefixStatus))
-        {
-            var name = tag[PrefixStatus.Length..];
-            ShowAdapterStatus(name);
-            return;
-        }
-
-        if (tag.StartsWith(PrefixDiagnose))
-        {
-            var name = tag[PrefixDiagnose.Length..];
-            DiagnoseAdapter(name);
-            return;
-        }
-
-        if (tag.StartsWith(PrefixProperties))
-        {
-            var name = tag[PrefixProperties.Length..];
-            OpenAdapterProperties(name);
             return;
         }
 
@@ -339,9 +317,9 @@ public class TrayManager : IDisposable
 
             var stateText = adapter.State switch
             {
-                NicState.Enabled => "🟢 已启用",
-                NicState.Disabled => "🔴 已禁用",
-                _ => "⚪ 未知",
+                NicState.Enabled => "[已启用]",
+                NicState.Disabled => "[已禁用]",
+                _ => "[未知]",
             };
             var typeText = adapter.IsHardware ? "物理网卡" : "虚拟网卡";
 
@@ -350,7 +328,7 @@ public class TrayManager : IDisposable
             sb.AppendLine($"状态: {stateText}");
             sb.AppendLine($"类型: {typeText}");
             sb.AppendLine();
-            sb.AppendLine("── IP 配置 ──");
+            sb.AppendLine("-- IP 配置 --");
             sb.Append(ipInfo);
 
             MessageBox.Show(sb.ToString(), "NICSwitch - 网卡状态", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -368,8 +346,7 @@ public class TrayManager : IDisposable
         try
         {
             Logger.Info($"诊断网卡: {name}");
-            // 使用 Windows 网络诊断工具
-            Process.Start(new ProcessStartInfo("msdt.exe", $"-id NetworkDiagnosticsNetworkAdapter")
+            Process.Start(new ProcessStartInfo("msdt.exe", "-id NetworkDiagnosticsNetworkAdapter")
             {
                 UseShellExecute = true,
             });
@@ -387,7 +364,6 @@ public class TrayManager : IDisposable
         try
         {
             Logger.Info($"打开网卡属性: {name}");
-            // 打开网络连接窗口，用户可在此右键查看属性
             Process.Start(new ProcessStartInfo("control", "ncpa.cpl")
             {
                 UseShellExecute = true,
@@ -415,9 +391,9 @@ public class TrayManager : IDisposable
             };
 
             if (success)
-                Logger.Info($"  ✓ {action.Action} {action.Name}");
+                Logger.Info($"  OK {action.Action} {action.Name}");
             else
-                Logger.Error($"  ✗ {action.Action} {action.Name}");
+                Logger.Error($"  FAIL {action.Action} {action.Name}");
 
             Thread.Sleep(300);
         }
