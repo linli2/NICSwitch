@@ -2,14 +2,77 @@
 
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace NICSwitch;
 
+// ── Win11 原生窗口圆角 ──────────────────────────
+
+internal static class NativeMethods
+{
+    [DllImport("dwmapi.dll")]
+    internal static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+    internal const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    internal const int DWMWCP_ROUND = 2;
+}
+
+/// <summary>带 Win11 圆角的 ContextMenuStrip</summary>
+public class Win11ContextMenuStrip : ContextMenuStrip
+{
+    public Win11ContextMenuStrip()
+    {
+        // 默认字体
+        Font = new Font("Segoe UI", 9F);
+        // 右侧留白
+        Padding = new Padding(0, 4, 0, 4);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        if (Environment.OSVersion.Version.Major >= 10)
+        {
+            int preference = NativeMethods.DWMWCP_ROUND;
+            NativeMethods.DwmSetWindowAttribute(
+                Handle, NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE,
+                ref preference, sizeof(int));
+        }
+    }
+}
+
+// ── Win11 风格渲染器 ────────────────────────────
+
+public class Win11Renderer : ToolStripProfessionalRenderer
+{
+    public Win11Renderer() : base(new Win11ColorTable()) { }
+}
+
+public class Win11ColorTable : ProfessionalColorTable
+{
+    // Win11 浅色主题色板
+    public override Color MenuItemSelected => Color.FromArgb(0xE5, 0xF0, 0xFF);
+    public override Color MenuItemBorder => Color.Transparent;
+    public override Color MenuItemSelectedGradientBegin => Color.FromArgb(0xE5, 0xF0, 0xFF);
+    public override Color MenuItemSelectedGradientEnd => Color.FromArgb(0xE5, 0xF0, 0xFF);
+    public override Color MenuItemPressedGradientBegin => Color.FromArgb(0xE5, 0xF0, 0xFF);
+    public override Color MenuItemPressedGradientEnd => Color.FromArgb(0xE5, 0xF0, 0xFF);
+    public override Color ToolStripDropDownBackground => Color.White;
+    public override Color ImageMarginGradientBegin => Color.White;
+    public override Color ImageMarginGradientMiddle => Color.White;
+    public override Color ImageMarginGradientEnd => Color.White;
+    public override Color SeparatorDark => Color.FromArgb(0xE0, 0xE0, 0xE0);
+    public override Color SeparatorLight => Color.Transparent;
+
+    // 标题行（禁用项）灰色
+    public override Color ToolStripBorder => Color.Transparent;
+}
+
 public class TrayManager : IDisposable
 {
     private readonly NotifyIcon _trayIcon;
-    private readonly ContextMenuStrip _menu = new();
+    private readonly Win11ContextMenuStrip _menu = new();
     private readonly System.Windows.Forms.Timer _refreshTimer = new();
     private Config _config;
     private List<NetworkAdapter> _adapters = new();
@@ -27,9 +90,8 @@ public class TrayManager : IDisposable
         _config = ConfigManager.Load();
         _adapters = NicManager.ListAdapters();
 
-        // ── 美化菜单渲染 ──
-        _menu.Renderer = new ModernMenuRenderer();
-        _menu.Font = new Font("Microsoft YaHei UI", 9F);
+        // Win11 风格渲染
+        _menu.Renderer = new Win11Renderer();
 
         // 托盘图标（优先加载同目录下 app.ico）
         var icon = LoadTrayIcon();
@@ -96,10 +158,21 @@ public class TrayManager : IDisposable
     {
         var bmp = new Bitmap(14, 14);
         using var g = Graphics.FromImage(bmp);
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
         using var brush = new SolidBrush(fill);
         g.FillEllipse(brush, 1, 1, 12, 12);
         return bmp;
+    }
+
+    // ── 创建 Win11 风格弹出菜单 ──────────────────
+
+    private Win11ContextMenuStrip CreatePopupMenu()
+    {
+        var popup = new Win11ContextMenuStrip
+        {
+            Renderer = new Win11Renderer(),
+        };
+        return popup;
     }
 
     // ── 鼠标点击 ──────────────────────────────────
@@ -139,14 +212,13 @@ public class TrayManager : IDisposable
             _menu.Items.Clear();
 
             // ═ 网卡列表 ═══════════
-            var header = new ToolStripMenuItem("== 网卡列表 ==") { Enabled = false };
-            _menu.Items.Add(header);
+            AddSectionHeader("网卡列表");
 
             var displayAdapters = _adapters;
 
             if (displayAdapters.Count == 0)
             {
-                _menu.Items.Add(new ToolStripMenuItem("  未发现网卡") { Enabled = false });
+                _menu.Items.Add(new ToolStripMenuItem("未发现网卡") { Enabled = false });
             }
             else
             {
@@ -159,11 +231,13 @@ public class TrayManager : IDisposable
                         Tag = PrefixToggle + name,
                         Image = isEnabled ? GreenDot() : RedDot(),
                         ForeColor = isEnabled
-                            ? Color.FromArgb(0x00, 0x7A, 0x33)   // 深绿色
-                            : Color.FromArgb(0xCC, 0x00, 0x00),  // 深红色
+                            ? Color.FromArgb(0x00, 0x75, 0x2F)   // 深绿色
+                            : Color.FromArgb(0xC0, 0x00, 0x00),  // 深红色
                         Font = isEnabled
                             ? new Font(_menu.Font, FontStyle.Bold)
                             : _menu.Font,
+                        // 增加项目高度
+                        Height = 26,
                     };
 
                     // 右键 -> 弹出操作菜单
@@ -173,11 +247,7 @@ public class TrayManager : IDisposable
                         {
                             _skipNextAdapterClick = true;
 
-                            // 弹出操作菜单
-                            var popup = new ContextMenuStrip();
-                            popup.Font = _menu.Font;
-                            popup.Renderer = new ModernMenuRenderer();
-
+                            var popup = CreatePopupMenu();
                             popup.Items.Add("启用/禁用", null, (_, _) =>
                             {
                                 Logger.Info($"切换网卡: {name}");
@@ -190,7 +260,6 @@ public class TrayManager : IDisposable
                             popup.Items.Add("状态", null, (_, _) => ShowAdapterStatus(name));
                             popup.Items.Add("属性", null, (_, _) => OpenAdapterProperties(name));
 
-                            // 在鼠标屏幕坐标位置弹出
                             popup.Show(Cursor.Position);
                         }
                     };
@@ -202,16 +271,16 @@ public class TrayManager : IDisposable
             _menu.Items.Add(new ToolStripSeparator());
 
             // ═ 快速切换 Profiles ═══
-            Logger.Debug($"Profiles 数量: {_config.Profiles.Count}");
             if (_config.Profiles.Count > 0)
             {
-                _menu.Items.Add(new ToolStripMenuItem("== 快速切换 ==") { Enabled = false });
+                AddSectionHeader("快速切换");
 
                 foreach (var profile in _config.Profiles)
                 {
                     var item = new ToolStripMenuItem(profile.Name)
                     {
                         Tag = PrefixProfile + profile.Name,
+                        Height = 26,
                     };
                     _menu.Items.Add(item);
                 }
@@ -220,24 +289,47 @@ public class TrayManager : IDisposable
             }
 
             // ═ 设置 ═══════════════
-            _menu.Items.Add(new ToolStripMenuItem("== 设置 ==") { Enabled = false });
+            AddSectionHeader("设置");
 
-            _menu.Items.Add(new ToolStripMenuItem("网卡设置", null, (_, _) => OpenNcpaCpl()));
-            _menu.Items.Add(new ToolStripMenuItem("刷新状态", null, (_, _) =>
+            AddActionItem("网卡设置", (_, _) => OpenNcpaCpl());
+            AddActionItem("刷新状态", (_, _) =>
             {
                 _adapters = NicManager.ListAdapters();
-            }));
-            _menu.Items.Add(new ToolStripMenuItem("编辑配置", null, (_, _) => OpenConfigFile()));
+            });
+            AddActionItem("编辑配置", (_, _) => OpenConfigFile());
 
             _menu.Items.Add(new ToolStripSeparator());
 
             // ═ 退出 ═══════════════
-            _menu.Items.Add(new ToolStripMenuItem("退出") { Tag = CmdQuit });
+            _menu.Items.Add(new ToolStripMenuItem("退出") { Tag = CmdQuit, Height = 26 });
         }
         finally
         {
             _rebuilding = false;
         }
+    }
+
+    // ── 辅助：添加分组标题 ────────────────────────
+
+    private void AddSectionHeader(string text)
+    {
+        _menu.Items.Add(new ToolStripMenuItem(text)
+        {
+            Enabled = false,
+            Font = new Font(_menu.Font, FontStyle.Bold),
+            ForeColor = Color.FromArgb(0x70, 0x70, 0x70),
+            Height = 22,
+        });
+    }
+
+    // ── 辅助：添加操作项 ──────────────────────────
+
+    private void AddActionItem(string text, EventHandler onClick)
+    {
+        _menu.Items.Add(new ToolStripMenuItem(text, null, onClick)
+        {
+            Height = 26,
+        });
     }
 
     // ── 菜单项点击 ─────────────────────────────────
@@ -325,7 +417,6 @@ public class TrayManager : IDisposable
                 return;
             }
 
-            // 获取详细网络配置
             var (exitCode, stdout, stderr) = NicManager.RunNetsh($"interface ip show address \"{name}\"");
             var ipInfo = exitCode == 0 ? stdout.Trim() : $"获取失败: {stderr.Trim()}";
 
@@ -450,22 +541,4 @@ public class TrayManager : IDisposable
         _trayIcon?.Dispose();
         _menu?.Dispose();
     }
-}
-
-/// 现代风格菜单渲染器（美化菜单外观）
-public class ModernMenuRenderer : ToolStripProfessionalRenderer
-{
-    public ModernMenuRenderer() : base(new ModernColorTable()) { }
-}
-
-public class ModernColorTable : ProfessionalColorTable
-{
-    public override Color MenuItemSelected => Color.FromArgb(0xE3, 0xF0, 0xFD);
-    public override Color MenuItemBorder => Color.FromArgb(0x99, 0xCF, 0xF8);
-    public override Color MenuItemSelectedGradientBegin => Color.FromArgb(0xE3, 0xF0, 0xFD);
-    public override Color MenuItemSelectedGradientEnd => Color.FromArgb(0xE3, 0xF0, 0xFD);
-    public override Color ToolStripDropDownBackground => Color.White;
-    public override Color ImageMarginGradientBegin => Color.White;
-    public override Color ImageMarginGradientMiddle => Color.White;
-    public override Color ImageMarginGradientEnd => Color.White;
 }
