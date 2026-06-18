@@ -2,6 +2,7 @@
 
 using System.Diagnostics;
 using System.Reflection;
+using System.Text;
 
 namespace NICSwitch;
 
@@ -17,9 +18,13 @@ public class TrayManager : IDisposable
     // ── 菜单项 ID 常量 ────────────────────────────
     private const string CmdRefresh = "__refresh__";
     private const string CmdEditConfig = "__edit_config__";
+    private const string CmdOpenNcpa = "__open_ncpa__";
     private const string CmdQuit = "__quit__";
     private const string PrefixToggle = "toggle:";
     private const string PrefixProfile = "profile:";
+    private const string PrefixStatus = "status:";
+    private const string PrefixDiagnose = "diagnose:";
+    private const string PrefixProperties = "properties:";
 
     public TrayManager()
     {
@@ -43,7 +48,6 @@ public class TrayManager : IDisposable
         _trayIcon.ContextMenuStrip = _menu;
 
         // 左键：通过反射调用 NotifyIcon.ShowContextMenu()
-        // 这是 .NET 内部方法，行为与右键完全一致
         _trayIcon.MouseClick += OnTrayMouseClick;
 
         // 菜单打开时刷新数据
@@ -96,8 +100,6 @@ public class TrayManager : IDisposable
         if (e.Button == MouseButtons.Left)
         {
             Logger.Info("左键单击 → 弹出菜单");
-            // 调用 NotifyIcon 内部 ShowContextMenu()
-            // 该方法触发 TrackPopupMenu，行为与右键完全一致（自动关闭）
             var method = typeof(NotifyIcon).GetMethod("ShowContextMenu",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             method?.Invoke(_trayIcon, null);
@@ -108,7 +110,6 @@ public class TrayManager : IDisposable
 
     private void OnMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        // 右键打开菜单时刷新数据（左键在 OnTrayMouseClick 已刷新）
         _adapters = NicManager.ListAdapters();
         RebuildMenu();
     }
@@ -140,14 +141,45 @@ public class TrayManager : IDisposable
                     var isEnabled = adapter.State == NicState.Enabled;
                     var item = new ToolStripMenuItem(adapter.Name)
                     {
-                        Tag = PrefixToggle + adapter.Name,
-                        Checked = isEnabled,
                         ForeColor = isEnabled
                             ? SystemColors.ControlText
                             : SystemColors.GrayText,
                     };
+
+                    // ── 子菜单：功能和 ncpa.cpl 右键一致 ──
+                    var toggleText = isEnabled ? "🔴 禁用" : "🟢 启用";
+                    var toggleItem = new ToolStripMenuItem(toggleText)
+                    {
+                        Tag = PrefixToggle + adapter.Name,
+                    };
+
+                    var statusItem = new ToolStripMenuItem("📊 状态")
+                    {
+                        Tag = PrefixStatus + adapter.Name,
+                    };
+
+                    var diagnoseItem = new ToolStripMenuItem("🔍 诊断")
+                    {
+                        Tag = PrefixDiagnose + adapter.Name,
+                    };
+
+                    var propsItem = new ToolStripMenuItem("⚙ 属性")
+                    {
+                        Tag = PrefixProperties + adapter.Name,
+                    };
+
+                    item.DropDownItems.Add(toggleItem);
+                    item.DropDownItems.Add(statusItem);
+                    item.DropDownItems.Add(diagnoseItem);
+                    item.DropDownItems.Add(new ToolStripSeparator());
+                    item.DropDownItems.Add(propsItem);
+
                     if (adapter.State == NicState.Unknown)
-                        item.Enabled = false;
+                    {
+                        toggleItem.Enabled = false;
+                        statusItem.Enabled = false;
+                    }
+
                     _menu.Items.Add(item);
                 }
             }
@@ -175,6 +207,7 @@ public class TrayManager : IDisposable
             // ═ 设置 ═══════════════
             _menu.Items.Add(new ToolStripMenuItem("⚙ 设置") { Enabled = false });
 
+            _menu.Items.Add(new ToolStripMenuItem("🌐 网卡设置") { Tag = CmdOpenNcpa });
             _menu.Items.Add(new ToolStripMenuItem("🔄 刷新状态") { Tag = CmdRefresh });
             _menu.Items.Add(new ToolStripMenuItem("✏️ 编辑配置") { Tag = CmdEditConfig });
 
@@ -197,12 +230,15 @@ public class TrayManager : IDisposable
         if (string.IsNullOrEmpty(tag)) return;
 
         Logger.Info($"菜单点击: {tag}");
-        // 菜单会自动关闭（原生 TrackPopupMenu），不需要手动 Close
 
         switch (tag)
         {
             case CmdRefresh:
                 _adapters = NicManager.ListAdapters();
+                return;
+
+            case CmdOpenNcpa:
+                OpenNcpaCpl();
                 return;
 
             case CmdEditConfig:
@@ -232,6 +268,27 @@ public class TrayManager : IDisposable
             return;
         }
 
+        if (tag.StartsWith(PrefixStatus))
+        {
+            var name = tag[PrefixStatus.Length..];
+            ShowAdapterStatus(name);
+            return;
+        }
+
+        if (tag.StartsWith(PrefixDiagnose))
+        {
+            var name = tag[PrefixDiagnose.Length..];
+            DiagnoseAdapter(name);
+            return;
+        }
+
+        if (tag.StartsWith(PrefixProperties))
+        {
+            var name = tag[PrefixProperties.Length..];
+            OpenAdapterProperties(name);
+            return;
+        }
+
         if (tag.StartsWith(PrefixProfile))
         {
             var profileName = tag[PrefixProfile.Length..];
@@ -241,6 +298,104 @@ public class TrayManager : IDisposable
                 ExecuteProfile(profile);
             }
             return;
+        }
+    }
+
+    // ── 打开网卡设置 (ncpa.cpl) ────────────────────
+
+    private static void OpenNcpaCpl()
+    {
+        try
+        {
+            Logger.Info("打开网卡设置 (ncpa.cpl)");
+            Process.Start(new ProcessStartInfo("control", "ncpa.cpl")
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"打开网卡设置失败: {ex.Message}");
+        }
+    }
+
+    // ── 显示网卡状态 ──────────────────────────────
+
+    private void ShowAdapterStatus(string name)
+    {
+        try
+        {
+            Logger.Info($"查看网卡状态: {name}");
+            var adapter = _adapters.FirstOrDefault(a => a.Name == name);
+            if (adapter == null)
+            {
+                MessageBox.Show($"未找到网卡: {name}", "NICSwitch", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 获取详细网络配置
+            var (exitCode, stdout, stderr) = NicManager.RunNetsh($"interface ip show address \"{name}\"");
+            var ipInfo = exitCode == 0 ? stdout.Trim() : $"获取失败: {stderr.Trim()}";
+
+            var stateText = adapter.State switch
+            {
+                NicState.Enabled => "🟢 已启用",
+                NicState.Disabled => "🔴 已禁用",
+                _ => "⚪ 未知",
+            };
+            var typeText = adapter.IsHardware ? "物理网卡" : "虚拟网卡";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"网卡: {adapter.Name}");
+            sb.AppendLine($"状态: {stateText}");
+            sb.AppendLine($"类型: {typeText}");
+            sb.AppendLine();
+            sb.AppendLine("── IP 配置 ──");
+            sb.Append(ipInfo);
+
+            MessageBox.Show(sb.ToString(), "NICSwitch - 网卡状态", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"显示网卡状态失败: {ex.Message}");
+        }
+    }
+
+    // ── 网络诊断 ──────────────────────────────────
+
+    private static void DiagnoseAdapter(string name)
+    {
+        try
+        {
+            Logger.Info($"诊断网卡: {name}");
+            // 使用 Windows 网络诊断工具
+            Process.Start(new ProcessStartInfo("msdt.exe", $"-id NetworkDiagnosticsNetworkAdapter")
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"启动诊断失败: {ex.Message}");
+        }
+    }
+
+    // ── 打开网卡属性 ──────────────────────────────
+
+    private static void OpenAdapterProperties(string name)
+    {
+        try
+        {
+            Logger.Info($"打开网卡属性: {name}");
+            // 打开网络连接窗口，用户可在此右键查看属性
+            Process.Start(new ProcessStartInfo("control", "ncpa.cpl")
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"打开网卡属性失败: {ex.Message}");
         }
     }
 
@@ -333,11 +488,11 @@ public class ModernMenuRenderer : ToolStripProfessionalRenderer
 
 public class ModernColorTable : ProfessionalColorTable
 {
-    public override Color MenuItemSelected => Color.FromArgb(0xE3, 0xF0, 0xFD);       // 悬停浅蓝
-    public override Color MenuItemBorder => Color.FromArgb(0x99, 0xCF, 0xF8);          // 悬停边框
+    public override Color MenuItemSelected => Color.FromArgb(0xE3, 0xF0, 0xFD);
+    public override Color MenuItemBorder => Color.FromArgb(0x99, 0xCF, 0xF8);
     public override Color MenuItemSelectedGradientBegin => Color.FromArgb(0xE3, 0xF0, 0xFD);
     public override Color MenuItemSelectedGradientEnd => Color.FromArgb(0xE3, 0xF0, 0xFD);
-    public override Color ToolStripDropDownBackground => Color.White;                   // 白底
+    public override Color ToolStripDropDownBackground => Color.White;
     public override Color ImageMarginGradientBegin => Color.White;
     public override Color ImageMarginGradientMiddle => Color.White;
     public override Color ImageMarginGradientEnd => Color.White;

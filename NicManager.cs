@@ -84,7 +84,7 @@ public static class NicManager
 
     // ── 内部 ──────────────────────────────────────
 
-    private static (int exitCode, string stdout, string stderr) RunNetsh(string args)
+    public static (int exitCode, string stdout, string stderr) RunNetsh(string args)
     {
         try
         {
