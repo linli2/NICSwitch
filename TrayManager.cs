@@ -231,7 +231,7 @@ public class TrayManager : IDisposable
                         Tag = PrefixToggle + name,
                         Image = isEnabled ? GreenDot() : RedDot(),
                         ForeColor = isEnabled
-                            ? Color.FromArgb(0x00, 0x75, 0x2F)   // 深绿色
+                            ? SystemColors.ControlText
                             : Color.FromArgb(0xC0, 0x00, 0x00),  // 深红色
                         Font = isEnabled
                             ? new Font(_menu.Font, FontStyle.Bold)
